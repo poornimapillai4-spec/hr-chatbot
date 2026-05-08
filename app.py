@@ -1,14 +1,18 @@
 import streamlit as st
-import tempfile, os
+import tempfile
+import os
+
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
+
 from groq import Groq
 
+# Page config
 st.set_page_config(page_title="HR Chatbot", layout="wide")
 
-st.title("🤖 HR Chat Assistant")
+st.title("💬 HR Chat Assistant")
 
 # session state
 if "vector_store" not in st.session_state:
@@ -17,42 +21,43 @@ if "vector_store" not in st.session_state:
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# upload
-import os
-from langchain_community.document_loaders import PyPDFLoader
-
-def load_pdfs_from_folder(folder_path="data"):
-    documents = []
-    for file in os.listdir(folder_path):
-        if file.endswith(".pdf"):
-            loader = PyPDFLoader(os.path.join(folder_path, file))
-            documents.extend(loader.load())
-    return documents
+# upload PDFs
+uploaded_files = st.file_uploader(
+    "Upload HR PDFs",
+    type=["pdf"],
+    accept_multiple_files=True
+)
 
 # process docs
 if st.button("Process Documents"):
-    all_docs = load_pdfs_from_folder()
+    if not uploaded_files:
+        st.warning("Upload at least one file")
+    else:
+        all_docs = []
 
-    if not all_docs:
-        st.error("No PDFs found in data folder")
-        st.stop()
+        for file in uploaded_files:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                tmp.write(file.read())
+                path = tmp.name
 
-    # add source automatically
-    for d in all_docs:
-        d.metadata["source"] = d.metadata.get("source", "data folder")
+            loader = PyPDFLoader(path)
+            docs = loader.load()
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    chunks = splitter.split_documents(all_docs)
+            for d in docs:
+                d.metadata["source"] = file.name
 
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
+            all_docs.extend(docs)
+            os.remove(path)
 
-    st.session_state.vector_store = FAISS.from_documents(chunks, embeddings)
+        splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+        chunks = splitter.split_documents(all_docs)
 
-    st.success("✅ Documents processed!")
+        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        st.session_state.vector_store = FAISS.from_documents(chunks, embeddings)
 
-# chat UI (ChatGPT style)
+        st.success("✅ Documents processed!")
+
+# chat UI
 st.markdown("---")
 
 if st.session_state.vector_store:
@@ -86,8 +91,9 @@ if st.session_state.vector_store:
                 Question:
                 {user_input}
                 """
-                import os
+
                 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
                 response = client.chat.completions.create(
                     model="llama-3.1-8b-instant",
                     messages=[{"role": "user", "content": prompt}]
@@ -97,7 +103,6 @@ if st.session_state.vector_store:
 
                 st.markdown(answer)
 
-                # show sources 🔥
                 st.markdown("**Sources:**")
                 for d in docs[:3]:
                     st.markdown(f"- {d.metadata.get('source', 'unknown')}")
