@@ -27,35 +27,40 @@ uploaded_files = st.file_uploader(
     type=["pdf"],
     accept_multiple_files=True
 )
+def load_pdfs_from_folder(folder_path="data"):
+    documents = []
+    
+    if not os.path.exists(folder_path):
+        return documents
 
-# process docs
-if st.button("Process Documents"):
-    if not uploaded_files:
-        st.warning("Upload at least one file")
-    else:
-        all_docs = []
-
-        for file in uploaded_files:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                tmp.write(file.read())
-                path = tmp.name
-
-            loader = PyPDFLoader(path)
+    for file in os.listdir(folder_path):
+        if file.endswith(".pdf"):
+            loader = PyPDFLoader(os.path.join(folder_path, file))
             docs = loader.load()
 
+            # add source name
             for d in docs:
-                d.metadata["source"] = file.name
+                d.metadata["source"] = file
 
-            all_docs.extend(docs)
-            os.remove(path)
+            documents.extend(docs)
 
-        splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-        chunks = splitter.split_documents(all_docs)
+    return documents
+# process docs
+if st.button("Process Documents"):
 
-        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-        st.session_state.vector_store = FAISS.from_documents(chunks, embeddings)
+    all_docs = load_pdfs_from_folder("data")
 
-        st.success("✅ Documents processed!")
+    if not all_docs:
+        st.error("No PDFs found in data folder")
+        st.stop()
+
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    chunks = splitter.split_documents(all_docs)
+
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    st.session_state.vector_store = FAISS.from_documents(chunks, embeddings)
+
+    st.success("✅ Documents processed!")
 
 # chat UI
 st.markdown("---")
